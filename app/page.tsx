@@ -102,7 +102,7 @@ export default function Home() {
           </div>
         </div>
         <div className="card stack">
-          <span className="badge">Demo user conectado a SQLite</span>
+          <span className="badge">Demo user conectado a base de datos</span>
           <div className="grid">
             <div className="metric"><span>Alumno</span><strong>{profile?.display_name ?? '...'}</strong></div>
             <div className="metric"><span>Nivel</span><strong>{profile?.target_level ?? '...'}</strong></div>

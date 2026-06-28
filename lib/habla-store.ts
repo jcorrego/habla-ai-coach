@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { Pool } from 'mysql2/promise';
 
 export type Profile = {
   user_id: string;
@@ -42,26 +43,101 @@ export type SessionReport = {
   created_at: string;
 };
 
+type DbDriver = 'sqlite' | 'mysql';
+type QueryParams = Array<string | number | null>;
+
+type HablaDb = {
+  driver: DbDriver;
+  exec(sql: string): Promise<void>;
+  get<T>(sql: string, params?: QueryParams): Promise<T | undefined>;
+  all<T>(sql: string, params?: QueryParams): Promise<T[]>;
+  run(sql: string, params?: QueryParams): Promise<void>;
+};
+
 const dataDir = path.join(process.cwd(), 'data');
-mkdirSync(dataDir, { recursive: true });
-const dbPath = process.env.HABLA_DB_PATH ?? path.join(dataDir, 'habla.db');
+const configuredDriver = (process.env.HABLA_DB_DRIVER ?? process.env.DB_DRIVER ?? 'sqlite').toLowerCase();
+export const HABLA_DB_DRIVER: DbDriver = configuredDriver === 'mysql' ? 'mysql' : 'sqlite';
+export const DEMO_USER_ID = 'demo-user';
 
 declare global {
   // eslint-disable-next-line no-var
-  var hablaDb: DatabaseSync | undefined;
+  var hablaDb: HablaDb | undefined;
+  // eslint-disable-next-line no-var
+  var hablaMysqlPool: Pool | undefined;
 }
 
-export function db() {
+export async function db() {
   if (!globalThis.hablaDb) {
-    globalThis.hablaDb = new DatabaseSync(dbPath);
-    migrate(globalThis.hablaDb);
-    seed(globalThis.hablaDb);
+    globalThis.hablaDb = HABLA_DB_DRIVER === 'mysql' ? await createMysqlDb() : createSqliteDb();
+    await migrate(globalThis.hablaDb);
+    await seed(globalThis.hablaDb);
   }
   return globalThis.hablaDb;
 }
 
-function migrate(database: DatabaseSync) {
-  database.exec(`
+function createSqliteDb(): HablaDb {
+  mkdirSync(dataDir, { recursive: true });
+  const dbPath = process.env.HABLA_DB_PATH ?? path.join(dataDir, 'habla.db');
+  const database = new DatabaseSync(dbPath);
+  return {
+    driver: 'sqlite',
+    async exec(sql: string) {
+      database.exec(sql);
+    },
+    async get<T>(sql: string, params: QueryParams = []) {
+      return database.prepare(sql).get(...params) as T | undefined;
+    },
+    async all<T>(sql: string, params: QueryParams = []) {
+      return database.prepare(sql).all(...params) as T[];
+    },
+    async run(sql: string, params: QueryParams = []) {
+      database.prepare(sql).run(...params);
+    }
+  };
+}
+
+async function createMysqlDb(): Promise<HablaDb> {
+  const mysql = await import('mysql2/promise');
+  globalThis.hablaMysqlPool ??= mysql.createPool({
+    host: process.env.MYSQL_HOST ?? process.env.DB_HOST ?? '127.0.0.1',
+    port: Number(process.env.MYSQL_PORT ?? process.env.DB_PORT ?? 3306),
+    database: process.env.MYSQL_DATABASE ?? process.env.DB_DATABASE,
+    user: process.env.MYSQL_USER ?? process.env.DB_USERNAME,
+    password: process.env.MYSQL_PASSWORD ?? process.env.DB_PASSWORD,
+    waitForConnections: true,
+    connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT ?? 5),
+    namedPlaceholders: false,
+    timezone: 'Z'
+  });
+  const pool = globalThis.hablaMysqlPool;
+  return {
+    driver: 'mysql',
+    async exec(sql: string) {
+      for (const statement of sql.split(';').map((entry) => entry.trim()).filter(Boolean)) {
+        await pool.query(statement);
+      }
+    },
+    async get<T>(sql: string, params: QueryParams = []) {
+      const [rows] = await pool.query(sql, params);
+      return (rows as T[])[0];
+    },
+    async all<T>(sql: string, params: QueryParams = []) {
+      const [rows] = await pool.query(sql, params);
+      return rows as T[];
+    },
+    async run(sql: string, params: QueryParams = []) {
+      await pool.query(sql, params);
+    }
+  };
+}
+
+async function migrate(database: HablaDb) {
+  if (database.driver === 'mysql') return migrateMysql(database);
+  return migrateSqlite(database);
+}
+
+async function migrateSqlite(database: HablaDb) {
+  await database.exec(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS profile (
       user_id TEXT PRIMARY KEY,
@@ -146,172 +222,300 @@ function migrate(database: DatabaseSync) {
   `);
 }
 
-function seed(database: DatabaseSync) {
-  const count = database.prepare('SELECT COUNT(*) as count FROM profile').get() as { count: number };
-  if (count.count > 0) return;
-  database.prepare(`
-    INSERT INTO profile (user_id, display_name, target_level, native_language)
-    VALUES ('demo-user', 'Juan Carlos', 'B2', 'es')
-  `).run();
-  database.prepare(`
-    INSERT INTO curriculum_plan (id, user_id, next_focus, rationale)
-    VALUES ('plan-demo-1', 'demo-user', 'Past simple vs present perfect in work updates', 'Initial B2 diagnostic focus for professional conversation practice.')
-  `).run();
+async function migrateMysql(database: HablaDb) {
+  await database.exec(`
+    CREATE TABLE IF NOT EXISTS profile (
+      user_id VARCHAR(64) PRIMARY KEY,
+      display_name VARCHAR(255) NOT NULL,
+      target_level VARCHAR(16) NOT NULL,
+      native_language VARCHAR(16) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS session (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      focus TEXT NOT NULL,
+      level VARCHAR(16) NOT NULL,
+      status VARCHAR(32) NOT NULL,
+      prompt_used TEXT NOT NULL,
+      prompt_version VARCHAR(64) NOT NULL,
+      transcript TEXT NULL,
+      audio_url TEXT NULL,
+      started_at TIMESTAMP NULL,
+      ended_at TIMESTAMP NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_session_user_created (user_id, created_at),
+      CONSTRAINT fk_session_profile FOREIGN KEY (user_id) REFERENCES profile(user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS learning_error (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      session_id VARCHAR(64) NOT NULL,
+      kind VARCHAR(64) NOT NULL,
+      excerpt TEXT NOT NULL,
+      correction TEXT NOT NULL,
+      explanation TEXT NOT NULL,
+      severity INT NOT NULL DEFAULT 1,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_learning_error_session (session_id),
+      CONSTRAINT fk_learning_error_session FOREIGN KEY (session_id) REFERENCES session(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS vocabulary_item (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      lemma VARCHAR(255) NOT NULL,
+      times_used INT NOT NULL DEFAULT 1,
+      mastery_score DOUBLE NOT NULL DEFAULT 0.2,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_vocabulary_user_lemma (user_id, lemma),
+      CONSTRAINT fk_vocabulary_profile FOREIGN KEY (user_id) REFERENCES profile(user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS progress_snapshot (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      session_id VARCHAR(64) NOT NULL UNIQUE,
+      fluency_score DOUBLE NOT NULL,
+      grammar_score DOUBLE NOT NULL,
+      vocab_score DOUBLE NOT NULL,
+      pronunciation_score DOUBLE NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_progress_user_created (user_id, created_at),
+      CONSTRAINT fk_progress_profile FOREIGN KEY (user_id) REFERENCES profile(user_id),
+      CONSTRAINT fk_progress_session FOREIGN KEY (session_id) REFERENCES session(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS curriculum_plan (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      next_focus TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      consumed_at TIMESTAMP NULL,
+      INDEX idx_curriculum_user_generated (user_id, generated_at),
+      CONSTRAINT fk_curriculum_profile FOREIGN KEY (user_id) REFERENCES profile(user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS session_report (
+      session_id VARCHAR(64) PRIMARY KEY,
+      summary TEXT NOT NULL,
+      strengths JSON NOT NULL,
+      practice_points JSON NOT NULL,
+      new_vocabulary JSON NOT NULL,
+      global_score DOUBLE NOT NULL,
+      grammar_score DOUBLE NOT NULL,
+      fluency_score DOUBLE NOT NULL,
+      vocab_score DOUBLE NOT NULL,
+      pronunciation_score DOUBLE NOT NULL,
+      next_focus TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_report_session FOREIGN KEY (session_id) REFERENCES session(id)
+    );
+  `);
 }
 
-export const DEMO_USER_ID = 'demo-user';
-
-export function getProfile(): Profile {
-  return db().prepare('SELECT * FROM profile WHERE user_id = ?').get(DEMO_USER_ID) as Profile;
+async function seed(database: HablaDb) {
+  const count = await database.get<{ count: number }>('SELECT COUNT(*) as count FROM profile');
+  if ((count?.count ?? 0) > 0) return;
+  await database.run(
+    'INSERT INTO profile (user_id, display_name, target_level, native_language) VALUES (?, ?, ?, ?)',
+    [DEMO_USER_ID, 'Juan Carlos', 'B2', 'es']
+  );
+  await database.run(
+    'INSERT INTO curriculum_plan (id, user_id, next_focus, rationale) VALUES (?, ?, ?, ?)',
+    ['plan-demo-1', DEMO_USER_ID, 'Past simple vs present perfect in work updates', 'Initial B2 diagnostic focus for professional conversation practice.']
+  );
 }
 
-export function updateProfile(input: { display_name: string; target_level: string; native_language: string }): Profile {
-  db().prepare(`
-    UPDATE profile
-    SET display_name = ?, target_level = ?, native_language = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE user_id = ?
-  `).run(input.display_name, input.target_level, input.native_language, DEMO_USER_ID);
+export async function getDbHealth() {
+  const database = await db();
+  const result = await database.get<{ ok: number }>('SELECT 1 as ok');
+  return {
+    ok: result?.ok === 1,
+    driver: database.driver
+  };
+}
+
+export async function getProfile(): Promise<Profile> {
+  return (await (await db()).get<Profile>('SELECT * FROM profile WHERE user_id = ?', [DEMO_USER_ID])) as Profile;
+}
+
+export async function updateProfile(input: { display_name: string; target_level: string; native_language: string }): Promise<Profile> {
+  await (await db()).run(
+    'UPDATE profile SET display_name = ?, target_level = ?, native_language = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
+    [input.display_name, input.target_level, input.native_language, DEMO_USER_ID]
+  );
   return getProfile();
 }
 
-export function getActivePlan() {
-  return db().prepare(`
+export async function getActivePlan() {
+  return (await db()).get<{ id: string; next_focus: string; rationale: string }>(`
     SELECT * FROM curriculum_plan
     WHERE user_id = ? AND consumed_at IS NULL
     ORDER BY generated_at DESC
     LIMIT 1
-  `).get(DEMO_USER_ID) as { id: string; next_focus: string; rationale: string } | undefined;
+  `, [DEMO_USER_ID]);
 }
 
-export function listSessions() {
-  return db().prepare(`
+export async function listSessions() {
+  return (await db()).all<Session & { global_score?: number; next_focus?: string }>(`
     SELECT s.*, r.global_score, r.next_focus
     FROM session s
     LEFT JOIN session_report r ON r.session_id = s.id
     WHERE s.user_id = ?
     ORDER BY s.created_at DESC
-  `).all(DEMO_USER_ID) as Array<Session & { global_score?: number; next_focus?: string }>;
+  `, [DEMO_USER_ID]);
 }
 
-export function getSession(id: string): Session | undefined {
-  return db().prepare('SELECT * FROM session WHERE id = ? AND user_id = ?').get(id, DEMO_USER_ID) as Session | undefined;
+export async function getSession(id: string): Promise<Session | undefined> {
+  return (await db()).get<Session>('SELECT * FROM session WHERE id = ? AND user_id = ?', [id, DEMO_USER_ID]);
 }
 
-export function getReport(sessionId: string): SessionReport | undefined {
-  const row = db().prepare('SELECT * FROM session_report WHERE session_id = ?').get(sessionId) as any;
+export async function getReport(sessionId: string): Promise<SessionReport | undefined> {
+  const row = await (await db()).get<any>('SELECT * FROM session_report WHERE session_id = ?', [sessionId]);
   if (!row) return undefined;
   return {
     ...row,
-    strengths: JSON.parse(row.strengths),
-    practice_points: JSON.parse(row.practice_points),
-    new_vocabulary: JSON.parse(row.new_vocabulary)
+    strengths: typeof row.strengths === 'string' ? JSON.parse(row.strengths) : row.strengths,
+    practice_points: typeof row.practice_points === 'string' ? JSON.parse(row.practice_points) : row.practice_points,
+    new_vocabulary: typeof row.new_vocabulary === 'string' ? JSON.parse(row.new_vocabulary) : row.new_vocabulary
   };
 }
 
-export function createSession() {
-  const profile = getProfile();
-  const plan = getActivePlan();
+export async function createSession() {
+  const profile = await getProfile();
+  const plan = await getActivePlan();
   const focus = plan?.next_focus ?? 'Introducing yourself and describing recent work';
   const id = crypto.randomUUID();
   const prompt = buildTeacherPrompt({ name: profile.display_name, level: profile.target_level, focus });
-  db().prepare(`
-    INSERT INTO session (id, user_id, focus, level, status, prompt_used, prompt_version)
-    VALUES (?, ?, ?, ?, 'prepared', ?, 'v1-entrega2-mock')
-  `).run(id, DEMO_USER_ID, focus, profile.target_level, prompt);
+  const database = await db();
+  await database.run(
+    "INSERT INTO session (id, user_id, focus, level, status, prompt_used, prompt_version) VALUES (?, ?, ?, ?, 'prepared', ?, 'v1-entrega2-mock')",
+    [id, DEMO_USER_ID, focus, profile.target_level, prompt]
+  );
   if (plan) {
-    db().prepare('UPDATE curriculum_plan SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?').run(plan.id);
+    await database.run('UPDATE curriculum_plan SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?', [plan.id]);
   }
-  return getSession(id)!;
+  return getSession(id);
 }
 
-export function startSession(id: string) {
-  db().prepare(`
-    UPDATE session SET status = 'in_progress', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND user_id = ?
-  `).run(id, DEMO_USER_ID);
-  return getSession(id)!;
+export async function startSession(id: string) {
+  await (await db()).run(
+    "UPDATE session SET status = 'in_progress', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+    [id, DEMO_USER_ID]
+  );
+  const session = await getSession(id);
+  if (!session) throw new Error('Session not found');
+  return session;
 }
 
-export function finishAndAnalyze(id: string, transcript: string) {
-  const session = getSession(id);
+export async function finishAndAnalyze(id: string, transcript: string) {
+  const session = await getSession(id);
   if (!session) throw new Error('Session not found');
   const analysis = analyzeTranscript(transcript, session.focus, session.level);
-  const database = db();
-  database.prepare(`
-    UPDATE session
-    SET status = 'reported', transcript = ?, ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND user_id = ?
-  `).run(transcript, id, DEMO_USER_ID);
+  const database = await db();
+  await database.run(
+    "UPDATE session SET status = 'reported', transcript = ?, ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+    [transcript, id, DEMO_USER_ID]
+  );
 
-  database.prepare('DELETE FROM learning_error WHERE session_id = ?').run(id);
+  await database.run('DELETE FROM learning_error WHERE session_id = ?', [id]);
   for (const error of analysis.errors) {
-    database.prepare(`
-      INSERT INTO learning_error (session_id, kind, excerpt, correction, explanation, severity)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, error.kind, error.excerpt, error.correction, error.explanation, error.severity);
+    await database.run(
+      'INSERT INTO learning_error (session_id, kind, excerpt, correction, explanation, severity) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, error.kind, error.excerpt, error.correction, error.explanation, error.severity]
+    );
   }
 
   for (const word of analysis.vocabulary) {
-    database.prepare(`
-      INSERT INTO vocabulary_item (user_id, lemma, times_used, mastery_score)
-      VALUES (?, ?, 1, 0.35)
-      ON CONFLICT(user_id, lemma) DO UPDATE SET
-        times_used = times_used + 1,
-        mastery_score = min(1.0, mastery_score + 0.08),
-        updated_at = CURRENT_TIMESTAMP
-    `).run(DEMO_USER_ID, word);
+    if (database.driver === 'mysql') {
+      await database.run(`
+        INSERT INTO vocabulary_item (user_id, lemma, times_used, mastery_score)
+        VALUES (?, ?, 1, 0.35)
+        ON DUPLICATE KEY UPDATE
+          times_used = times_used + 1,
+          mastery_score = LEAST(1.0, mastery_score + 0.08),
+          updated_at = CURRENT_TIMESTAMP
+      `, [DEMO_USER_ID, word]);
+    } else {
+      await database.run(`
+        INSERT INTO vocabulary_item (user_id, lemma, times_used, mastery_score)
+        VALUES (?, ?, 1, 0.35)
+        ON CONFLICT(user_id, lemma) DO UPDATE SET
+          times_used = times_used + 1,
+          mastery_score = min(1.0, mastery_score + 0.08),
+          updated_at = CURRENT_TIMESTAMP
+      `, [DEMO_USER_ID, word]);
+    }
   }
 
-  database.prepare(`
-    INSERT OR REPLACE INTO progress_snapshot (user_id, session_id, fluency_score, grammar_score, vocab_score, pronunciation_score)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(DEMO_USER_ID, id, analysis.scores.fluency, analysis.scores.grammar, analysis.scores.vocab, analysis.scores.pronunciation);
+  if (database.driver === 'mysql') {
+    await database.run(`
+      INSERT INTO progress_snapshot (user_id, session_id, fluency_score, grammar_score, vocab_score, pronunciation_score)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        fluency_score = VALUES(fluency_score),
+        grammar_score = VALUES(grammar_score),
+        vocab_score = VALUES(vocab_score),
+        pronunciation_score = VALUES(pronunciation_score)
+    `, [DEMO_USER_ID, id, analysis.scores.fluency, analysis.scores.grammar, analysis.scores.vocab, analysis.scores.pronunciation]);
 
-  database.prepare(`
-    INSERT OR REPLACE INTO session_report
-    (session_id, summary, strengths, practice_points, new_vocabulary, global_score, grammar_score, fluency_score, vocab_score, pronunciation_score, next_focus)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    analysis.summary,
-    JSON.stringify(analysis.strengths),
-    JSON.stringify(analysis.practicePoints),
-    JSON.stringify(analysis.vocabulary),
-    analysis.scores.global,
-    analysis.scores.grammar,
-    analysis.scores.fluency,
-    analysis.scores.vocab,
-    analysis.scores.pronunciation,
-    analysis.nextFocus
+    await database.run(`
+      INSERT INTO session_report
+      (session_id, summary, strengths, practice_points, new_vocabulary, global_score, grammar_score, fluency_score, vocab_score, pronunciation_score, next_focus)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        summary = VALUES(summary), strengths = VALUES(strengths), practice_points = VALUES(practice_points),
+        new_vocabulary = VALUES(new_vocabulary), global_score = VALUES(global_score), grammar_score = VALUES(grammar_score),
+        fluency_score = VALUES(fluency_score), vocab_score = VALUES(vocab_score), pronunciation_score = VALUES(pronunciation_score),
+        next_focus = VALUES(next_focus)
+    `, [id, analysis.summary, JSON.stringify(analysis.strengths), JSON.stringify(analysis.practicePoints), JSON.stringify(analysis.vocabulary), analysis.scores.global, analysis.scores.grammar, analysis.scores.fluency, analysis.scores.vocab, analysis.scores.pronunciation, analysis.nextFocus]);
+  } else {
+    await database.run(`
+      INSERT OR REPLACE INTO progress_snapshot (user_id, session_id, fluency_score, grammar_score, vocab_score, pronunciation_score)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [DEMO_USER_ID, id, analysis.scores.fluency, analysis.scores.grammar, analysis.scores.vocab, analysis.scores.pronunciation]);
+
+    await database.run(`
+      INSERT OR REPLACE INTO session_report
+      (session_id, summary, strengths, practice_points, new_vocabulary, global_score, grammar_score, fluency_score, vocab_score, pronunciation_score, next_focus)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, analysis.summary, JSON.stringify(analysis.strengths), JSON.stringify(analysis.practicePoints), JSON.stringify(analysis.vocabulary), analysis.scores.global, analysis.scores.grammar, analysis.scores.fluency, analysis.scores.vocab, analysis.scores.pronunciation, analysis.nextFocus]);
+  }
+
+  await database.run(
+    'INSERT INTO curriculum_plan (id, user_id, next_focus, rationale) VALUES (?, ?, ?, ?)',
+    [crypto.randomUUID(), DEMO_USER_ID, analysis.nextFocus, analysis.nextFocusRationale]
   );
 
-  database.prepare(`
-    INSERT INTO curriculum_plan (id, user_id, next_focus, rationale)
-    VALUES (?, ?, ?, ?)
-  `).run(crypto.randomUUID(), DEMO_USER_ID, analysis.nextFocus, analysis.nextFocusRationale);
-
-  return { session: getSession(id)!, report: getReport(id)! };
+  return { session: (await getSession(id))!, report: (await getReport(id))! };
 }
 
-export function progressSummary() {
-  const snapshots = db().prepare(`
+export async function progressSummary() {
+  const database = await db();
+  const snapshots = await database.all<any>(`
     SELECT * FROM progress_snapshot
     WHERE user_id = ?
     ORDER BY created_at ASC
-  `).all(DEMO_USER_ID) as Array<any>;
-  const vocab = db().prepare(`
+  `, [DEMO_USER_ID]);
+  const vocab = await database.all(`
     SELECT lemma, times_used, mastery_score FROM vocabulary_item
     WHERE user_id = ? ORDER BY mastery_score ASC, times_used DESC LIMIT 10
-  `).all(DEMO_USER_ID);
-  const errors = db().prepare(`
+  `, [DEMO_USER_ID]);
+  const maxSeverity = database.driver === 'mysql' ? 'MAX(le.severity)' : 'max(le.severity)';
+  const errors = await database.all(`
     SELECT kind, excerpt, correction, COUNT(*) as count
     FROM learning_error le
     JOIN session s ON s.id = le.session_id
     WHERE s.user_id = ?
     GROUP BY kind, excerpt, correction
-    ORDER BY count DESC, max(le.severity) DESC
+    ORDER BY count DESC, ${maxSeverity} DESC
     LIMIT 10
-  `).all(DEMO_USER_ID);
+  `, [DEMO_USER_ID]);
   return { snapshots, vocab, errors };
 }
 

@@ -4,5 +4,5 @@ import { progressSummary } from '@/lib/habla-store';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  return NextResponse.json(progressSummary());
+  return NextResponse.json(await progressSummary());
 }

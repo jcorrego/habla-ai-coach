@@ -12,7 +12,7 @@ export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
   try {
-    return NextResponse.json(finishAndAnalyze(id, body.transcript || fallbackTranscript));
+    return NextResponse.json(await finishAndAnalyze(id, body.transcript || fallbackTranscript));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 404 });
   }

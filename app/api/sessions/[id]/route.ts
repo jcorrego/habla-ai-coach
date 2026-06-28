@@ -7,7 +7,7 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
-  const session = getSession(id);
+  const session = await getSession(id);
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
-  return NextResponse.json({ session, report: getReport(id) ?? null });
+  return NextResponse.json({ session, report: (await getReport(id)) ?? null });
 }

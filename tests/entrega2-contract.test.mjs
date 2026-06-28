@@ -16,8 +16,12 @@ test('MVP has frontend, backend API routes and connected persistence layer', () 
   assert.ok(existsSync(`${root}/app/page.tsx`), 'frontend page exists');
   assert.ok(existsSync(`${root}/app/api/sessions/route.ts`), 'sessions API exists');
   assert.ok(existsSync(`${root}/app/api/sessions/[id]/finish/route.ts`), 'finish API exists');
+  assert.ok(existsSync(`${root}/app/api/health/route.ts`), 'health API exists');
+  assert.ok(existsSync(`${root}/.env.example`), '.env.example exists');
   const store = read('lib/habla-store.ts');
   assert.match(store, /DatabaseSync/);
+  assert.match(store, /mysql2\/promise/);
+  assert.match(store, /HABLA_DB_DRIVER/);
   assert.match(store, /CREATE TABLE IF NOT EXISTS session/);
   assert.match(store, /CREATE TABLE IF NOT EXISTS session_report/);
   assert.match(store, /finishAndAnalyze/);

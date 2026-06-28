@@ -18,7 +18,7 @@ Esta rama añade una primera implementación funcional con:
 
 - Frontend Next.js con dashboard, perfil, sesión y reporte.
 - Backend mediante API routes de Next.js.
-- Base de datos SQLite local usando `node:sqlite`.
+- Base de datos SQLite local usando `node:sqlite` y soporte MySQL 8 para producción en Forge.
 - Persistencia de perfil, sesiones, errores, vocabulario, snapshots de progreso, reportes y planes curriculares.
 - Mock controlado de proveedor de voz/LLM para no bloquear el flujo E2E por integraciones externas.
 - Tests básicos de contrato de entrega.
@@ -27,13 +27,14 @@ Esta rama añade una primera implementación funcional con:
 
 - Next.js / React / TypeScript
 - API routes server-side como backend MVP
-- SQLite local (`data/habla.db`)
+- SQLite local (`data/habla.db`) / MySQL 8 en producción
 - Node.js 26+
 
 ## Ejecutar en local
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -76,11 +77,29 @@ npm run start
 
 ## Base de datos
 
-La BD se crea automáticamente en:
+La app soporta dos drivers mediante variables de entorno:
+
+```env
+# Local
+HABLA_DB_DRIVER=sqlite
+HABLA_DB_PATH=data/habla.db
+
+# Producción Forge
+HABLA_DB_DRIVER=mysql
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_DATABASE=habla
+MYSQL_USER=habla
+MYSQL_PASSWORD=[REDACTED]
+```
+
+La BD local se crea automáticamente en:
 
 ```text
 data/habla.db
 ```
+
+En Forge se usa MySQL 8 con las variables reales configuradas en el panel del site, no en Git.
 
 Tablas principales:
 
@@ -92,17 +111,25 @@ Tablas principales:
 - `curriculum_plan`
 - `session_report`
 
+Healthcheck:
+
+```text
+GET /api/health
+```
+
+Responde el estado de la app y el driver activo (`sqlite` o `mysql`).
+
 ## Decisiones para llegar al MVP
 
 - Se usa un usuario demo en lugar de Supabase Auth real para poder cerrar un flujo E2E ejecutable en poco tiempo.
-- Se usa SQLite local como BD conectada. La documentación de Entrega 1 sigue proponiendo Supabase como evolución natural.
+- Se usa SQLite local como BD conectada y MySQL 8 en producción Forge. La documentación de Entrega 1 sigue proponiendo Supabase como evolución natural.
 - La conversación de voz y el análisis IA están mockeados, pero encapsulados en funciones (`buildTeacherPrompt`, `finishAndAnalyze`, `analyzeTranscript`) para sustituir por OpenAI Realtime/Gemini Live + Whisper.
 - El PR de Entrega 2 debe usar iniciales **JCO**: `feature-entrega2-JCO`.
 
 ## Próximos pasos hacia entrega final
 
 1. Reemplazar usuario demo por Supabase Auth.
-2. Migrar SQLite a Supabase Postgres con RLS.
+2. Migrar autenticación y permisos a Supabase Auth/Postgres con RLS si el producto avanza más allá del MVP.
 3. Implementar `ProviderGateway` real con OpenAI Realtime o Gemini Live.
 4. Integrar transcripción real.
 5. Añadir Playwright E2E real sobre navegador.

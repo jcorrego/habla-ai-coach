@@ -41,5 +41,12 @@ test('status page and JSON health expose the active sqlite test database', async
   await page.goto('/status');
   await expect(page.getByRole('heading', { name: 'Habla status' })).toBeVisible();
   await expect(page.getByText('Database')).toBeVisible();
-  await expect(page.getByText('sqlite')).toBeVisible();
+  await expect(page.locator('.status-metrics .metric').filter({ hasText: 'Database' })).toContainText('sqlite');
+  await expect(page.getByRole('heading', { name: 'Checklist de entrega' })).toBeVisible();
+  await expect(page.getByText('Forge autodeploy conectado al branch de Entrega 2')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Deploy info' })).toBeVisible();
+  await expect(page.getByText('feature-entrega2-JCO')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Endpoints verificados por arquitectura' })).toBeVisible();
+  await expect(page.getByText('/api/scenarios')).toBeVisible();
+  await expect(page.getByText('/api/demo/seed')).toBeVisible();
 });

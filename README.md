@@ -20,6 +20,8 @@ Esta rama añade una primera implementación funcional con:
 - Backend mediante API routes de Next.js.
 - Base de datos SQLite local usando `node:sqlite` y soporte MySQL 8 para producción en Forge.
 - Persistencia de perfil, sesiones, errores, vocabulario, snapshots de progreso, reportes y planes curriculares.
+- Página `/status` y endpoint `/api/health` para comprobar app/DB en producción.
+- Escenarios de práctica demo y seed de datos para presentación.
 - Mock controlado de proveedor de voz/LLM para no bloquear el flujo E2E por integraciones externas.
 - Tests básicos de contrato de entrega.
 
@@ -56,11 +58,13 @@ npm run start
 
 1. Abrir `/`.
 2. Revisar/editar el perfil demo.
-3. Pulsar **Preparar sesión**.
-4. Pulsar **Iniciar**.
-5. Revisar o editar la transcripción simulada.
-6. Pulsar **Finalizar y analizar**.
-7. Ver el reporte generado y el historial conectado a BD.
+3. Opcional: pulsar **Seed demo** para preparar historial limpio.
+4. Seleccionar un escenario de práctica.
+5. Pulsar **Preparar sesión**.
+6. Pulsar **Iniciar**.
+7. Revisar o editar la transcripción simulada.
+8. Pulsar **Finalizar y analizar**.
+9. Ver el reporte generado y el historial conectado a BD.
 
 ## API MVP
 
@@ -74,6 +78,9 @@ npm run start
 | `POST` | `/api/sessions/:id/start` | Marca sesión como `in_progress`. |
 | `POST` | `/api/sessions/:id/finish` | Guarda transcripción, analiza y genera reporte. |
 | `GET` | `/api/progress` | Devuelve snapshots, vocabulario y errores recurrentes. |
+| `GET` | `/api/health` | Healthcheck de app y base de datos. |
+| `GET` | `/api/scenarios` | Devuelve escenarios de práctica demo. |
+| `POST` | `/api/demo/seed` | Resetea y prepara datos demo. |
 
 ## Base de datos
 
@@ -118,6 +125,17 @@ GET /api/health
 ```
 
 Responde el estado de la app y el driver activo (`sqlite` o `mysql`).
+
+Página visual de estado:
+
+```text
+/status
+```
+
+Documentación adicional:
+
+- `docs/08-production-deploy.md`
+- `docs/09-architecture.md`
 
 ## Decisiones para llegar al MVP
 

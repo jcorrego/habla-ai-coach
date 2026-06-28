@@ -10,7 +10,9 @@ export async function GET() {
       ok: db.ok,
       app: 'habla-ai-coach',
       product: 'Habla',
-      db: db.driver
+      db: db.driver,
+      environment: db.environment,
+      session_count: db.session_count
     });
   } catch (error) {
     return NextResponse.json({

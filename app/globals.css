@@ -29,6 +29,10 @@ p { color: var(--muted); line-height: 1.6; }
 .metric { padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: #fbfdff; }
 .metric strong { display:block; font-size: 28px; }
 .badge { display: inline-flex; align-items:center; gap: 6px; background: #eaf1ff; color: #1e3a8a; border-radius: 999px; padding: 6px 10px; font-size: 13px; font-weight: 700; }
+.badge.ok { background: #dcfce7; color: #166534; }
+.badge.warn { background: #fef3c7; color: #92400e; }
+.notice { background: #eef6ff; border: 1px solid #bfdbfe; color: #1e3a8a; padding: 10px 12px; border-radius: 12px; }
+.small-strong { font-size: 15px !important; overflow-wrap: anywhere; }
 .btn { border: 0; background: var(--primary); color: white; padding: 12px 16px; border-radius: 12px; font-weight: 800; cursor: pointer; text-decoration: none; display: inline-flex; justify-content:center; align-items:center; gap: 8px; }
 .btn:hover { background: var(--primary-dark); }
 .btn.secondary { background: #e2e8f0; color: #0f172a; }

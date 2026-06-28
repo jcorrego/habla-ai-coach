@@ -59,6 +59,53 @@ const configuredDriver = (process.env.HABLA_DB_DRIVER ?? process.env.DB_DRIVER ?
 export const HABLA_DB_DRIVER: DbDriver = configuredDriver === 'mysql' ? 'mysql' : 'sqlite';
 export const DEMO_USER_ID = 'demo-user';
 
+export type PracticeScenario = {
+  id: string;
+  title: string;
+  description: string;
+  focus: string;
+  transcript: string;
+};
+
+export const PRACTICE_SCENARIOS: PracticeScenario[] = [
+  {
+    id: 'work-update',
+    title: 'Daily standup / work update',
+    description: 'Practica explicar avances, bloqueos y próximos pasos en un contexto profesional.',
+    focus: 'Use connectors to give longer B2 answers in work conversations',
+    transcript: 'Teacher: Give me a concise work update. Student: Last week I worked on a production deployment because the project needed a real demo. However, I found a database issue and fixed it before the release.'
+  },
+  {
+    id: 'job-interview',
+    title: 'Job interview story',
+    description: 'Responde preguntas de entrevista usando pasado simple, logros y tradeoffs.',
+    focus: 'Tell a structured work achievement using past simple and impact metrics',
+    transcript: 'Teacher: Tell me about a project you are proud of. Student: I built an automation workflow because the team spent too much time on manual reports. Therefore, we saved time and improved consistency.'
+  },
+  {
+    id: 'project-pitch',
+    title: 'Project pitch',
+    description: 'Presenta Habla en inglés con claridad, problema, solución y siguiente paso.',
+    focus: 'Pitch a product idea with problem, solution, evidence and next step',
+    transcript: 'Teacher: Pitch your product in one minute. Student: Habla helps Spanish speakers practice English speaking. It creates short sessions, analyzes mistakes, and recommends the next focus, although the current MVP uses mock voice.'
+  },
+  {
+    id: 'casual-small-talk',
+    title: 'Casual small talk',
+    description: 'Practica conversación natural para romper el hielo sin sonar robótico.',
+    focus: 'Sound natural in casual small talk using follow-up questions',
+    transcript: 'Teacher: What did you do this weekend? Student: I went for a walk and worked on a small app because I wanted to practice. After that, I watched a movie and relaxed.'
+  }
+];
+
+export function listPracticeScenarios() {
+  return PRACTICE_SCENARIOS;
+}
+
+export function getPracticeScenario(id?: string | null) {
+  return PRACTICE_SCENARIOS.find((scenario) => scenario.id === id) ?? PRACTICE_SCENARIOS[0];
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var hablaDb: HablaDb | undefined;
@@ -334,9 +381,12 @@ async function seed(database: HablaDb) {
 export async function getDbHealth() {
   const database = await db();
   const result = await database.get<{ ok: number }>('SELECT 1 as ok');
+  const sessionCount = await database.get<{ count: number }>('SELECT COUNT(*) as count FROM session WHERE user_id = ?', [DEMO_USER_ID]);
   return {
     ok: result?.ok === 1,
-    driver: database.driver
+    driver: database.driver,
+    environment: process.env.NODE_ENV ?? 'development',
+    session_count: sessionCount?.count ?? 0
   };
 }
 
@@ -386,10 +436,11 @@ export async function getReport(sessionId: string): Promise<SessionReport | unde
   };
 }
 
-export async function createSession() {
+export async function createSession(scenarioId?: string) {
   const profile = await getProfile();
   const plan = await getActivePlan();
-  const focus = plan?.next_focus ?? 'Introducing yourself and describing recent work';
+  const scenario = getPracticeScenario(scenarioId);
+  const focus = scenarioId ? scenario.focus : (plan?.next_focus ?? scenario.focus);
   const id = crypto.randomUUID();
   const prompt = buildTeacherPrompt({ name: profile.display_name, level: profile.target_level, focus });
   const database = await db();
@@ -493,6 +544,40 @@ export async function finishAndAnalyze(id: string, transcript: string) {
   );
 
   return { session: (await getSession(id))!, report: (await getReport(id))! };
+}
+
+
+export async function resetDemoData() {
+  const database = await db();
+  await database.run('DELETE FROM learning_error');
+  await database.run('DELETE FROM session_report');
+  await database.run('DELETE FROM progress_snapshot');
+  await database.run('DELETE FROM vocabulary_item WHERE user_id = ?', [DEMO_USER_ID]);
+  await database.run('DELETE FROM curriculum_plan WHERE user_id = ?', [DEMO_USER_ID]);
+  await database.run('DELETE FROM session WHERE user_id = ?', [DEMO_USER_ID]);
+  await database.run('DELETE FROM profile WHERE user_id = ?', [DEMO_USER_ID]);
+  await database.run(
+    'INSERT INTO profile (user_id, display_name, target_level, native_language) VALUES (?, ?, ?, ?)',
+    [DEMO_USER_ID, 'Juan Carlos', 'B2', 'es']
+  );
+  await database.run(
+    'INSERT INTO curriculum_plan (id, user_id, next_focus, rationale) VALUES (?, ?, ?, ?)',
+    ['plan-demo-1', DEMO_USER_ID, getPracticeScenario('work-update').focus, 'Demo reset creates a clean B2 learning path for the presentation.']
+  );
+
+  for (const scenario of PRACTICE_SCENARIOS.slice(0, 3)) {
+    const session = await createSession(scenario.id);
+    if (!session) throw new Error(`Could not create demo session for ${scenario.id}`);
+    await startSession(session.id);
+    await finishAndAnalyze(session.id, scenario.transcript);
+  }
+
+  return {
+    ok: true,
+    profile: await getProfile(),
+    sessions: await listSessions(),
+    progress: await progressSummary()
+  };
 }
 
 export async function progressSummary() {

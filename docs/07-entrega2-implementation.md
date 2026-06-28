@@ -22,6 +22,8 @@ PersonaPlex queda como research de proveedor/modelo de voz, no como nombre del p
 - Análisis mock determinista de transcript.
 - Reporte persistido.
 - Vocabulario, errores, snapshots de progreso y plan adaptativo persistidos.
+- Selector de escenarios de práctica y seed demo para presentación.
+- Página `/status` para healthcheck visual en producción.
 - README y `prompts.md`.
 - Tests de contrato de Entrega 2.
 
@@ -45,7 +47,7 @@ HABLA_DB_DRIVER=sqlite
 HABLA_DB_PATH=data/habla.db
 ```
 
-El endpoint `GET /api/health` reporta si la app puede conectar a la base de datos y qué driver está activo.
+El endpoint `GET /api/health` reporta si la app puede conectar a la base de datos y qué driver está activo. La página `/status` presenta la misma información en formato visual para demo.
 
 ## Verificación realizada
 
@@ -63,6 +65,8 @@ Flujo verificado con `curl`:
 4. `POST /api/sessions/:id/finish`
 5. `GET /api/progress`
 6. `GET /api/health`
+7. `GET /api/scenarios`
+8. `POST /api/demo/seed`
 
 Resultado: se creó una sesión, pasó a `reported`, generó reporte y guardó progreso/vocabulario en la base de datos activa.
 

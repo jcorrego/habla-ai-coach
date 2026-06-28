@@ -22,6 +22,13 @@ type Report = {
 const fallbackTranscript = `Teacher: Tell me about a recent work challenge.
 Student: Last week I worked on an AI automation project. It was difficult because the requirements changed, however I made a small plan and explained the tradeoffs to the team.`;
 
+const scenarioIcons: Record<string, string> = {
+  'work-update': '💼',
+  'job-interview': '🎯',
+  'project-pitch': '🚀',
+  'casual-small-talk': '☕'
+};
+
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -35,6 +42,7 @@ export default function Home() {
   const [notice, setNotice] = useState('');
   const latestScore = useMemo(() => sessions.find((s) => s.global_score)?.global_score ?? '—', [sessions]);
   const selectedScenario = scenarios.find((scenario) => scenario.id === selectedScenarioId);
+  const completedSessions = sessions.filter((session) => session.status === 'reported').length;
 
   async function refresh() {
     const [profileResponse, sessionsResponse, healthResponse, scenariosResponse] = await Promise.all([
@@ -130,116 +138,159 @@ export default function Home() {
   }
 
   return (
-    <main className="page">
-      <section className="hero">
-        <div>
-          <span className="kicker">Entrega 2 · MVP funcional desplegado</span>
+    <main className="page app-shell">
+      <section className="hero hero-premium">
+        <div className="hero-copy">
+          <div className="brand-pill"><span className="brand-dot" /> Entrega 2 · MVP funcional desplegado</div>
           <h1>Habla</h1>
-          <p>
-            AI speaking coach para practicar inglés con sesiones cortas, análisis post-sesión y un plan adaptativo para la siguiente práctica.
+          <p className="hero-lead">
+            A speaking coach that turns short English practice into a visible learning loop: scenario, transcript, feedback, score and next focus.
           </p>
-          <div className="row">
-            <button className="btn" onClick={prepareSession} disabled={loading}>Preparar sesión</button>
-            <button className="btn secondary" onClick={seedDemo} disabled={loading}>Seed demo</button>
-            <a className="btn secondary" href="/status">Ver status</a>
+          <div className="hero-actions row">
+            <button className="btn btn-glow" onClick={prepareSession} disabled={loading}>Preparar sesión</button>
+            <button className="btn ghost" onClick={seedDemo} disabled={loading}>Seed demo</button>
+            <a className="btn ghost" href="/status">Ver status</a>
           </div>
-          {notice && <p className="notice">{notice}</p>}
+          {notice && <p className="notice live-note">{notice}</p>}
         </div>
-        <div className="card stack">
-          <div className="row">
+
+        <div className="hero-panel glass-card">
+          <div className="status-strip">
             <span className={`badge ${health?.ok ? 'ok' : 'warn'}`}>{health?.ok ? 'App OK' : 'Revisando app'}</span>
-            <span className="badge">DB: {health?.db ?? '...'}</span>
-            <span className="badge">{health?.environment ?? '...'}</span>
+            <span className="badge dark">DB: {health?.db ?? '...'}</span>
+            <span className="badge dark">{health?.environment ?? '...'}</span>
           </div>
-          <div className="grid">
-            <div className="metric"><span>Alumno</span><strong>{profile?.display_name ?? '...'}</strong></div>
-            <div className="metric"><span>Nivel</span><strong>{profile?.target_level ?? '...'}</strong></div>
-            <div className="metric"><span>Último score</span><strong>{latestScore}</strong></div>
+          <div className="coach-card">
+            <div>
+              <span className="eyebrow">Current learner</span>
+              <strong>{profile?.display_name ?? '...'}</strong>
+              <small>{profile?.target_level ?? '...'} · native {profile?.native_language ?? '...'}</small>
+            </div>
+            <div className="score-orb"><span>{latestScore}</span><small>last score</small></div>
+          </div>
+          <div className="mini-grid">
+            <Metric label="Scenarios" value={scenarios.length || '—'} />
+            <Metric label="Reported" value={completedSessions} />
+            <Metric label="Sessions" value={sessions.length} />
           </div>
         </div>
       </section>
 
-      <section className="grid-2">
-        <div className="card">
-          <h2>1. Perfil / onboarding</h2>
+      <section className="workflow-card">
+        <div className="section-heading">
+          <span className="kicker">Demo workflow</span>
+          <h2>Elige un escenario y ejecuta el loop completo</h2>
+        </div>
+        <div className="stepper" aria-label="Habla demo flow">
+          {['Perfil', 'Escenario', 'Sesión', 'Reporte'].map((step, index) => <span key={step}><b>{index + 1}</b>{step}</span>)}
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="card profile-card">
+          <div className="card-title"><span>01</span><h2>Perfil / onboarding</h2></div>
           <form className="stack" action={updateProfile}>
             <label>Nombre
               <input name="display_name" defaultValue={profile?.display_name ?? ''} />
             </label>
-            <label>Nivel objetivo
-              <select name="target_level" defaultValue={profile?.target_level ?? 'B2'}>
-                {['A1','A2','B1','B2','C1','C2'].map((level) => <option key={level}>{level}</option>)}
-              </select>
-            </label>
-            <label>Idioma nativo
-              <input name="native_language" defaultValue={profile?.native_language ?? 'es'} />
-            </label>
-            <button className="btn" disabled={loading}>Guardar perfil</button>
+            <div className="form-grid">
+              <label>Nivel objetivo
+                <select name="target_level" defaultValue={profile?.target_level ?? 'B2'}>
+                  {['A1','A2','B1','B2','C1','C2'].map((level) => <option key={level}>{level}</option>)}
+                </select>
+              </label>
+              <label>Idioma nativo
+                <input name="native_language" defaultValue={profile?.native_language ?? 'es'} />
+              </label>
+            </div>
+            <button className="btn compact" disabled={loading}>Guardar perfil</button>
           </form>
         </div>
 
-        <div className="card stack">
-          <h2>2. Escenario de práctica</h2>
-          <label>Selecciona demo
+        <div className="card scenario-card stack">
+          <div className="card-title"><span>02</span><h2>Escenario de práctica</h2></div>
+          <label className="sr-friendly">Selecciona demo
             <select value={selectedScenarioId} onChange={(event) => setSelectedScenarioId(event.target.value)}>
               {scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.title}</option>)}
             </select>
           </label>
-          <p>{selectedScenario?.description ?? 'Carga escenarios para preparar una práctica.'}</p>
-          <div className="metric"><span>Foco pedagógico</span><strong>{selectedScenario?.focus ?? '...'}</strong></div>
+          <div className="scenario-tiles">
+            {scenarios.map((scenario) => (
+              <button
+                key={scenario.id}
+                type="button"
+                className={`scenario-tile ${scenario.id === selectedScenarioId ? 'active' : ''}`}
+                onClick={() => setSelectedScenarioId(scenario.id)}
+              >
+                <span>{scenarioIcons[scenario.id] ?? '🗣️'}</span>
+                <b>{scenario.title}</b>
+                <small>{scenario.description}</small>
+              </button>
+            ))}
+          </div>
+          <div className="focus-card"><span>Foco pedagógico</span><strong>{selectedScenario?.focus ?? '...'}</strong></div>
         </div>
       </section>
 
-      <section className="card stack" style={{ marginTop: 16 }}>
-        <h2>3. Sesión preparada</h2>
-        {activeSession ? (
-          <>
-            <div className="metric"><span>Foco</span><strong>{activeSession.focus}</strong></div>
-            <p><b>Estado:</b> {activeSession.status}</p>
-            <details>
-              <summary>Prompt generado</summary>
-              <p>{activeSession.prompt_used}</p>
-            </details>
-            <div className="row">
-              <button className="btn secondary" onClick={startSession} disabled={loading || activeSession.status !== 'prepared'}>Iniciar</button>
-              <button className="btn" onClick={finishSession} disabled={loading || activeSession.status === 'reported'}>Finalizar y analizar</button>
-            </div>
-          </>
-        ) : <p>Prepara una sesión para crear el registro en base de datos y generar el prompt.</p>}
-      </section>
+      <section className="workbench-grid">
+        <div className="card session-card stack">
+          <div className="card-title"><span>03</span><h2>Sesión preparada</h2></div>
+          {activeSession ? (
+            <>
+              <div className="focus-card"><span>Foco</span><strong>{activeSession.focus}</strong></div>
+              <p className="state-line"><b>Estado:</b> {activeSession.status}</p>
+              <details className="prompt-box">
+                <summary>Prompt generado</summary>
+                <p>{activeSession.prompt_used}</p>
+              </details>
+              <div className="row">
+                <button className="btn ghost" onClick={startSession} disabled={loading || activeSession.status !== 'prepared'}>Iniciar</button>
+                <button className="btn" onClick={finishSession} disabled={loading || activeSession.status === 'reported'}>Finalizar y analizar</button>
+              </div>
+            </>
+          ) : <p>Prepara una sesión para crear el registro en base de datos y generar el prompt.</p>}
+        </div>
 
-      <section className="card" style={{ marginTop: 16 }}>
-        <h2>4. Conversación simulada para demo</h2>
-        <p>Entrega 2 usa un proveedor de voz mockeado para demostrar el flujo E2E. Cambia el escenario o edita la transcripción para ver cómo cambia el análisis.</p>
-        <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} />
+        <div className="card transcript-card">
+          <div className="card-title"><span>04</span><h2>Conversación simulada para demo</h2></div>
+          <p>Entrega 2 usa un proveedor de voz mockeado para demostrar el flujo E2E. Cambia el escenario o edita la transcripción para ver cómo cambia el análisis.</p>
+          <textarea value={transcript} onChange={(event) => setTranscript(event.target.value)} />
+        </div>
       </section>
 
       {report && (
-        <section className="card" style={{ marginTop: 16 }}>
-          <h2>5. Reporte personalizado</h2>
-          <p>{report.summary}</p>
-          <div className="grid">
-            <Score label="Global" value={report.global_score} />
+        <section className="report-card">
+          <div className="report-header">
+            <div>
+              <span className="kicker">Feedback report</span>
+              <h2>5. Reporte personalizado</h2>
+              <p>{report.summary}</p>
+            </div>
+            <div className="score-orb large"><span>{report.global_score}</span><small>global</small></div>
+          </div>
+          <div className="score-grid">
             <Score label="Gramática" value={report.grammar_score} />
             <Score label="Fluidez" value={report.fluency_score} />
             <Score label="Vocabulario" value={report.vocab_score} />
             <Score label="Pronunciación" value={report.pronunciation_score} />
           </div>
-          <div className="grid-2" style={{ marginTop: 16 }}>
+          <div className="grid-2 report-lists">
             <List title="Fortalezas" items={report.strengths} />
             <List title="Practicar ahora" items={report.practice_points} />
           </div>
-          <p><b>Vocabulario nuevo:</b> {report.new_vocabulary.join(', ')}</p>
-          <p><b>Siguiente foco adaptativo:</b> {report.next_focus}</p>
+          <div className="vocab-row" aria-label="Vocabulario nuevo">
+            {report.new_vocabulary.map((word) => <span key={word}>{word}</span>)}
+          </div>
+          <div className="next-focus"><b>Siguiente foco adaptativo:</b> {report.next_focus}</div>
         </section>
       )}
 
-      <section id="historial" className="card" style={{ marginTop: 16 }}>
-        <h2>Historial conectado a BD</h2>
+      <section id="historial" className="card history-card">
+        <div className="card-title"><span>DB</span><h2>Historial conectado a BD</h2></div>
         <ul className="timeline">
           {sessions.map((session) => (
             <li key={session.id}>
-              <b>{session.focus}</b><br />
+              <b>{session.focus}</b>
               <span>{session.status} · {formatDate(session.created_at)} {session.global_score ? `· score ${session.global_score}` : ''}</span>
             </li>
           ))}
@@ -252,12 +303,16 @@ export default function Home() {
   );
 }
 
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
+}
+
 function Score({ label, value }: { label: string; value: number }) {
-  return <div className="metric"><span>{label}</span><strong>{value}</strong><div className="score"><span style={{ width: `${value}%` }} /></div></div>;
+  return <div className="metric score-metric"><span>{label}</span><strong>{value}</strong><div className="score"><span style={{ width: `${value}%` }} /></div></div>;
 }
 
 function List({ title, items }: { title: string; items: string[] }) {
-  return <div><h3>{title}</h3><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></div>;
+  return <div className="list-card"><h3>{title}</h3><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></div>;
 }
 
 function formatDate(value: string) {

@@ -49,10 +49,14 @@ http://localhost:3000
 ## Scripts
 
 ```bash
+npm run test:unit
+npm run test:e2e
 npm run test
 npm run build
 npm run start
 ```
+
+`npm run test` ejecuta primero los tests unitarios/de contrato con `node:test` y luego los E2E de Playwright en Chromium.
 
 ## Flujo demo
 

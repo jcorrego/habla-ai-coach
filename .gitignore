@@ -6,3 +6,5 @@ data/*.db-*
 .env.local
 .vercel
 .DS_Store
+playwright-report
+test-results

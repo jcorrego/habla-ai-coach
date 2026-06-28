@@ -53,9 +53,13 @@ El endpoint `GET /api/health` reporta si la app puede conectar a la base de dato
 
 ```bash
 npm run test
+npm run test:unit
+npm run test:e2e
 npm run build
 npm run dev -- --hostname 127.0.0.1 --port 3100
 ```
+
+La suite ahora combina tests unitarios/de contrato con `node:test` y E2E de Playwright para validar el flujo principal en navegador.
 
 Flujo verificado con `curl`:
 

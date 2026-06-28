@@ -84,6 +84,23 @@ Cada escenario trae:
 - Historial, reportes, vocabulario y progreso persistidos.
 - Auto deploy desde Forge.
 
+## Testing
+
+La Entrega 2 combina dos niveles:
+
+```text
+node:test  → contrato de archivos, lógica de análisis, escenarios y seed demo
+Playwright → flujo navegador: home, seed demo, escenario, sesión, reporte y /status
+```
+
+Comandos:
+
+```bash
+npm run test:unit
+npm run test:e2e
+npm run test
+```
+
 ## Evolución natural
 
 1. Proteger `POST /api/demo/seed` o quitarlo al salir de demo.
@@ -91,4 +108,4 @@ Cada escenario trae:
 3. Sustituir transcript demo por grabación/audio upload.
 4. Crear `ProviderGateway` para OpenAI Realtime/Gemini Live.
 5. Persistir audio/transcripción real.
-6. Añadir tests E2E con Playwright.
+6. Ampliar tests Playwright con casos de error, móvil y regresión visual.
